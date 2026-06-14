@@ -18,7 +18,59 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
+
 from tools import search_listings, suggest_outfit, create_fit_card
+
+
+# ── query parsing ───────────────────────────────────────────────────────────────
+
+# Clothing sizes we recognize as standalone tokens in a query.
+_SIZE_TOKENS = ["xxs", "xs", "s", "m", "l", "xl", "xxl", "xxxl"]
+
+
+def _parse_query(query: str) -> dict:
+    """
+    Extract a description, size, and max_price from a natural language query.
+
+    Uses simple regex/string rules (no LLM call) — the query is short and the
+    three fields follow predictable patterns ("under $30", "size M"). The
+    leftover words become the description that search_listings scores against.
+
+    Returns a dict with keys: description, size, max_price.
+    """
+    text = query.strip()
+
+    # max_price — "under $30", "below 30", "$30", "under 30 dollars".
+    max_price = None
+    price_match = re.search(r"\$?\s*(\d+(?:\.\d+)?)\s*(?:dollars|usd|bucks)?", text)
+    if price_match and re.search(r"under|below|less than|max|\$|cheap", text, re.I):
+        max_price = float(price_match.group(1))
+
+    # size — explicit "size M" first, then a standalone size token.
+    size = None
+    size_match = re.search(r"size\s+([a-z0-9/]+)", text, re.I)
+    if size_match:
+        size = size_match.group(1).upper()
+    else:
+        for token in re.findall(r"\b[a-z]+\b", text, re.I):
+            if token.lower() in _SIZE_TOKENS:
+                size = token.upper()
+                break
+
+    # description — the original query with the price/size phrases stripped so
+    # only the descriptive keywords remain for scoring.
+    description = re.sub(
+        r"(under|below|less than|max)\s*\$?\s*\d+(?:\.\d+)?\s*(dollars|usd|bucks)?",
+        " ",
+        text,
+        flags=re.I,
+    )
+    description = re.sub(r"\$\s*\d+(?:\.\d+)?", " ", description)
+    description = re.sub(r"size\s+[a-z0-9/]+", " ", description, flags=re.I)
+    description = re.sub(r"\s+", " ", description).strip()
+
+    return {"description": description or text, "size": size, "max_price": max_price}
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -92,9 +144,45 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: fresh session — the single source of truth for this interaction.
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: parse the query into description / size / max_price.
+    session["parsed"] = _parse_query(query)
+    parsed = session["parsed"]
+
+    # Step 3: search the listings. An empty result ends the run early — we don't
+    # hand empty input to suggest_outfit.
+    session["search_results"] = search_listings(
+        description=parsed["description"],
+        size=parsed["size"],
+        max_price=parsed["max_price"],
+    )
+    if not session["search_results"]:
+        price_note = (
+            f" under ${parsed['max_price']:.0f}" if parsed["max_price"] else ""
+        )
+        size_note = f" in size {parsed['size']}" if parsed["size"] else ""
+        session["error"] = (
+            f"No listings matched '{parsed['description']}'{size_note}{price_note}. "
+            "Try different keywords, a larger budget, or another size."
+        )
+        return session
+
+    # Step 4: use the top (best-scoring) result.
+    session["selected_item"] = session["search_results"][0]
+
+    # Step 5: suggest an outfit pairing the new item with the wardrobe.
+    session["outfit_suggestion"] = suggest_outfit(
+        session["selected_item"], wardrobe
+    )
+
+    # Step 6: turn the outfit into a shareable caption.
+    session["fit_card"] = create_fit_card(
+        session["outfit_suggestion"], session["selected_item"]
+    )
+
+    # Step 7: done — error stays None on success.
     return session
 
 
