@@ -62,34 +62,9 @@ Your implementation files go in this same directory. There's no required file st
 
 ---
 
-# FitFindr — My Project Writeup
-
-FitFindr is my agent that helps you shop secondhand. You tell it what kind of item you're looking for, it digs through the listings to find one, pairs it with stuff already in your wardrobe to build a full outfit, and then writes you a caption you could actually post on Instagram.
-
-## How to run it
-
-```bash
-pip install -r requirements.txt          # install dependencies
-```
-
-Add your Groq key to a `.env` file in the project root:
-```
-GROQ_API_KEY=your_key_here
-```
-
-Then either run the agent from the command line:
-```bash
-python agent.py        # runs a happy-path query and a no-results query
-```
-
-Or launch the web app:
-```bash
-python app.py          # open the localhost URL it prints (usually http://localhost:7860)
-```
-
 ## Tool Inventory
 
-I built the three required tools. They each live in `tools.py` and can be tested on their own before the agent wires them together.
+I built the three tools in `tools.py` and can be tested on their own before the agent wires them together.
 
 ### 1. `search_listings`
 - **Purpose:** Takes the name, size, and max price of the item the user is looking for and searches the listings to return a "new item" they can buy and build an outfit around.
@@ -156,5 +131,10 @@ I confirmed it never called `suggest_outfit` or `create_fit_card` on that empty 
 
 ## Spec Reflection
 
-Building this lined up pretty closely with what I planned in `planning.md`. The biggest thing I learned was how important it is that state actually flows between tools instead of each step re-deciding things on its own — once I checked that the same item dict travels all the way from `search_listings` to the caption, the whole loop made a lot more sense. The error branch was also more important than I first thought: stopping early on an empty search keeps the agent from feeding garbage into the LLM tools. If I kept going, I'd improve how the query gets parsed, since right now extra words from a conversational question can end up in the description.
+Writing out the vision in planning.md made iplementing the overall project 100% easier because pointing claude to the section I wanted to implement was smooth sailing. This also gave it context on how to connect the multiple tools in the way I wanted.
+
+## AI Usage
+
+Two specific instances in which I used AI to generate sections in this project are iplementing the architecure/loop and the error handling for the three tools. Firstly, was the error handling in which I had to specifically tell claude to stick to my original plan and follow the architecture diagram because it added its own path where it would fall back to general styling advice if the suggest outfit tool failed, I advised it too recommend clothing that is close to the original search and then call the search_listings tool again. The second instance is when the planning loop was writtin in planning.md and used to implement the Loop to run and connect all three tools to work in this project. Claude originally added a outfit guard to the create fit card tool which I didnt want because the diagram wouldnt  have allowed the loop to reach that point if there wasnt a full outfit ready in the last step.
+
 
